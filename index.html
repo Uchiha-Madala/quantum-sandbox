@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>量子沙盒 · Quantum Sandbox</title>
+<style>
+body{background:#101418;color:#dfe6ee;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px;margin:0}
+h1{font-size:18px;margin:8px}
+canvas{background:#0a0d10;border-radius:8px}
+.ctrl{display:flex;gap:8px;margin:12px;flex-wrap:wrap;justify-content:center}
+button{background:#2a3b4d;color:#dfe6ee;border:none;padding:8px 14px;border-radius:6px;cursor:pointer}
+button:hover{background:#3a5068}
+label{font-size:13px;display:flex;align-items:center;gap:6px}
+input[type=range]{width:90px}
+</style>
+</head>
+<body>
+<h1>量子沙盒 · 一维薛定谔方程实时演化</h1>
+<canvas id="cv" width="720" height="360"></canvas>
+<div class="ctrl">
+<button onclick="preset('free')">自由波包</button>
+<button onclick="preset('well')">无限深势阱</button>
+<button onclick="preset('ho')">谐振子</button>
+<button onclick="preset('barrier')">势垒隧穿</button>
+<button onclick="togglePlay()">暂停</button>
+<button onclick="preset(cur)">重置</button>
+<label>势垒高 <input type="range" id="v0" min="1" max="40" value="15" oninput="buildBarrier()"></label>
+<label>波包动量 <input type="range" id="k0" min="0" max="20" value="10" oninput="buildK()"></label>
+</div>
+<script>
+const N=512, L=12, dx=L/N, dt=0.002;
+const re=new Float64Array(N), im=new Float64Array(N), V=new Float64Array(N);
+let playing=true, cur='free', t=0;
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+
+function fft(a,b,invert){
+  const n=a.length;
+  for(let i=1,j=0;i<n;i++){
+    let bit=n>>1;
+    for(;j&bit;bit>>=1)j^=bit;
+    j^=bit;
+    if(i<j){let t=a[i];a[i]=a[j];a[j]=t;t=b[i];b[i]=b[j];b[j]=t;}
+  }
+  for(let len=2;len<=n;len<<=1){
+    const ang=2*Math.PI/len*(invert?-1:1);
+    const wr=Math.cos(ang),wi=Math.sin(ang);
+    for(let i=0;i<n;i+=len){
+      let cr=1,ci=0;
+      for(let k=0;k<len/2;k++){
+        const ur=a[i+k],ui=b[i+k];
+        const vr=a[i+k+len/2]*cr-b[i+k+len/2]*ci;
+        const vi=a[i+k+len/2]*ci+b[i+k+len/2]*cr;
+        a[i+k]=ur+vr;b[i+k]=ui+vi;
+        a[i+k+len/2]=ur-vr;b[i+k+len/2]=ui-vi;
+        const nr=cr*wr-ci*wi;
+        ci=cr*wi+ci*wr;cr=nr;
+      }
+    }
+  }
+  if(invert)for(let i=0;i<n;i++){a[i]/=n;b[i]/=n;}
+}
+
+function step(){
+  fft(re,im,false);
+  for(let i=0;i<N;i++){
+    const m=i<N/2?i:i-N;
+    const k=2*Math.PI*m/L;
+    const ph=-0.5*k*k*dt;
+    const c=Math.cos(ph),s=Math.sin(ph);
+    const nr=re[i]*c-im[i]*s;
+    im[i]=re[i]*s+im[i]*c;re[i]=nr;
+  }
+  fft(re,im,true);
+  for(let i=0;i<N;i++){
+    const ph=-V[i]*dt;
+    const c=Math.cos(ph),s=Math.sin(ph);
+    const nr=re[i]*c-im[i]*s;
+    im[i]=re[i]*s+im[i]*c;re[i]=nr;
+  }
+  t+=dt;
+}
+
+function xAt(i){return -L/2+i*dx;}
+function buildFree(){for(let i=0;i<N;i++)V[i]=0;}
+function buildWell(){for(let i=0;i<N;i++){const x=xAt(i);V[i]=(x<-5||x>5)?1e4:0;}}
+function buildHO(){for(let i=0;i<N;i++){const x=xAt(i);V[i]=0.5*x*x;}}
+function buildBarrier(){
+  const v0=+document.getElementById('v0').value;
+  for(let i=0;i<N;i++){const x=xAt(i);V[i]=(x>-0.6&&x<0.6)?v0:0;}
+}
+function buildWave(k0,cx,w){
+  for(let i=0;i<N;i++){
+    const x=xAt(i);
+    const g=Math.exp(-(x-cx)*(x-cx)/(2*w*w));
+    re[i]=g*Math.cos(k0*x);
+    im[i]=g*Math.sin(k0*x);
+  }
+}
+function buildK(){
+  const k0=+document.getElementById('k0').value;
+  if(cur==='free'||cur==='barrier')buildWave(k0,-4,0.5);
+}
+function preset(name){
+  cur=name;
+  if(name==='free')buildFree();
+  if(name==='well'){buildWell();buildWave(8,0,1.2);}
+  if(name==='ho'){buildHO();buildWave(6,-2,0.6);}
+  if(name==='barrier'){buildBarrier();buildWave(+document.getElementById('k0').value,-4,0.5);}
+  t=0;
+}
+function togglePlay(){playing=!playing;document.querySelector('#playbtn').textContent=playing?'暂停':'播放';}
+
+function draw(){
+  ctx.fillStyle='#0a0d10';ctx.fillRect(0,0,720,360);
+  ctx.beginPath();
+  for(let i=0;i<N;i++){
+    const px=i/N*720;
+    const vv=Math.min(V[i],40)/40;
+    const py=110-vv*70;
+    if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);
+  }
+  ctx.strokeStyle='#5a6a7a';ctx.lineWidth=1.5;ctx.stroke();
+  let mx=0;for(let i=0;i<N;i++){const p=re[i]*re[i]+im[i]*im[i];if(p>mx)mx=p;}
+  ctx.beginPath();
+  for(let i=0;i<N;i++){
+    const px=i/N*720;
+    const p=re[i]*re[i]+im[i]*im[i];
+    const py=340-p/mx*220;
+    if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);
+  }
+  ctx.strokeStyle='#4dc3ff';ctx.lineWidth=2;ctx.stroke();
+  ctx.fillStyle='#8899aa';ctx.font='12px sans-serif';
+  ctx.fillText('t = '+t.toFixed(1),8,352);
+}
+function loop(){
+  if(playing)for(let s=0;s<4;s++)step();
+  draw();
+  requestAnimationFrame(loop);
+}
+preset('free');
+loop();
+</script>
+</body>
+</html>
