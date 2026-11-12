@@ -125,7 +125,8 @@ function clearDraw(){buildFree();}
 function paint(e){
   const rect=cv.getBoundingClientRect();
   const x=((e.clientX-rect.left)/rect.width)*L-L/2;
-  const h=+document.getElementById('v0').value;
+  const yc=(e.clientY-rect.top)/rect.height*360;
+  const h=Math.max(0,Math.min(40,40*(110-yc)/70));
   const i=Math.round((x+L/2)/dx);
   for(let j=i-4;j<=i+4;j++){if(j>=0&&j<N)V[j]=h;}
 }
