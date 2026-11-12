@@ -7,17 +7,19 @@
 <style>
 body{background:#101418;color:#dfe6ee;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px;margin:0}
 h1{font-size:18px;margin:8px}
-canvas{background:#0a0d10;border-radius:8px}
+canvas{background:#0a0d10;border-radius:8px;touch-action:none}
 .ctrl{display:flex;gap:8px;margin:12px;flex-wrap:wrap;justify-content:center}
 button{background:#2a3b4d;color:#dfe6ee;border:none;padding:8px 14px;border-radius:6px;cursor:pointer}
 button:hover{background:#3a5068}
 label{font-size:13px;display:flex;align-items:center;gap:6px}
 input[type=range]{width:90px}
+#info{font-size:13px;color:#9ab;margin:4px 0 10px;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
 <h1>量子沙盒 · 一维薛定谔方程实时演化</h1>
 <canvas id="cv" width="720" height="360"></canvas>
+<div id="info">t = 0</div>
 <div class="ctrl">
 <button onclick="preset('free')">自由波包</button>
 <button onclick="preset('well')">无限深势阱</button>
@@ -25,13 +27,15 @@ input[type=range]{width:90px}
 <button onclick="preset('barrier')">势垒隧穿</button>
 <button onclick="togglePlay()">暂停</button>
 <button onclick="preset(cur)">重置</button>
-<label>势垒高 <input type="range" id="v0" min="1" max="40" value="15" oninput="buildBarrier()"></label>
-<label>波包动量 <input type="range" id="k0" min="0" max="20" value="10" oninput="buildK()"></label>
+<button id="drawbtn" onclick="drawMode()">画笔模式</button>
+<button onclick="clearDraw()">清除画迹</button>
+<label>势垒高 <input type="range" id="v0" min="1" max="40" value="15" oninput="v0change()"></label>
+<label>波包动量 <input type="range" id="k0" min="0" max="20" value="10" oninput="k0change()"></label>
 </div>
 <script>
 const N=512, L=12, dx=L/N, dt=0.002;
 const re=new Float64Array(N), im=new Float64Array(N), V=new Float64Array(N);
-let playing=true, cur='free', t=0;
+let playing=true, cur='free', t=0, mode='preset', drawing=false;
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
 
 function fft(a,b,invert){
@@ -97,19 +101,65 @@ function buildWave(k0,cx,w){
     im[i]=g*Math.sin(k0*x);
   }
 }
-function buildK(){
+function k0change(){
   const k0=+document.getElementById('k0').value;
   if(cur==='free'||cur==='barrier')buildWave(k0,-4,0.5);
 }
+function v0change(){if(cur==='barrier')buildBarrier();}
 function preset(name){
-  cur=name;
+  cur=name; mode='preset';
+  document.getElementById('drawbtn').textContent='画笔模式';
   if(name==='free')buildFree();
   if(name==='well'){buildWell();buildWave(8,0,1.2);}
   if(name==='ho'){buildHO();buildWave(6,-2,0.6);}
   if(name==='barrier'){buildBarrier();buildWave(+document.getElementById('k0').value,-4,0.5);}
   t=0;
 }
-function togglePlay(){playing=!playing;document.querySelector('#playbtn').textContent=playing?'暂停':'播放';}
+function togglePlay(){playing=!playing;}
+function drawMode(){
+  mode=(mode==='draw')?'preset':'draw';
+  document.getElementById('drawbtn').textContent=mode==='draw'?'画笔中·在画布上拖拽':'画笔模式';
+}
+function clearDraw(){buildFree();}
+
+function paint(e){
+  const rect=cv.getBoundingClientRect();
+  const x=((e.clientX-rect.left)/rect.width)*L-L/2;
+  const h=+document.getElementById('v0').value;
+  const i=Math.round((x+L/2)/dx);
+  for(let j=i-4;j<=i+4;j++){if(j>=0&&j<N)V[j]=h;}
+}
+cv.addEventListener('pointerdown',e=>{if(mode==='draw'){drawing=true;paint(e);e.preventDefault();}});
+cv.addEventListener('pointermove',e=>{if(drawing&&mode==='draw')paint(e);});
+window.addEventListener('pointerup',()=>drawing=false);
+
+function calcE(){
+  let norm=0,ev=0;
+  for(let i=0;i<N;i++){
+    const p=re[i]*re[i]+im[i]*im[i];
+    norm+=p;ev+=p*V[i];
+  }
+  ev/=norm;
+  const fr=Float64Array.from(re),fi=Float64Array.from(im);
+  fft(fr,fi,false);
+  let ek=0;
+  for(let i=0;i<N;i++){
+    const m=i<N/2?i:i-N;
+    const k=2*Math.PI*m/L;
+    ek+=(fr[i]*fr[i]+fi[i]*fi[i])*0.5*k*k;
+  }
+  ek/=norm*N;
+  return ev+ek;
+}
+function trans(){
+  let total=0,right=0;
+  for(let i=0;i<N;i++){
+    const p=re[i]*re[i]+im[i]*im[i];
+    total+=p;
+    if(xAt(i)>0.6)right+=p;
+  }
+  return right/total;
+}
 
 function draw(){
   ctx.fillStyle='#0a0d10';ctx.fillRect(0,0,720,360);
@@ -130,8 +180,8 @@ function draw(){
     if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);
   }
   ctx.strokeStyle='#4dc3ff';ctx.lineWidth=2;ctx.stroke();
-  ctx.fillStyle='#8899aa';ctx.font='12px sans-serif';
-  ctx.fillText('t = '+t.toFixed(1),8,352);
+  const E=calcE(),T=trans();
+  document.getElementById('info').textContent='t = '+t.toFixed(1)+'   ⟨E⟩ = '+E.toFixed(3)+'   右侧概率 = '+(T*100).toFixed(1)+'%';
 }
 function loop(){
   if(playing)for(let s=0;s<4;s++)step();
